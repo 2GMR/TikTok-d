@@ -35,15 +35,24 @@ async function handleWebhook(request, env) {
 
   try {
     const apiRes = await fetch(
-      `${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`
+      `${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+          "Accept": "application/json",
+          "Referer": "https://www.tikwm.com/",
+        },
+      }
     );
+
     const apiData = await apiRes.json();
 
     if (!apiData || apiData.code !== 0 || !apiData.data) {
       await sendMessage(
         env.BOT_TOKEN,
         chatId,
-        "⚠️ تعذّر استخراج الفيديو. تأكد من الرابط وحاول مجدداً."
+        `⚠️ فشل استخراج الفيديو.\nالكود: ${apiData?.code}\nالرسالة: ${apiData?.msg}`
       );
       return new Response("ok");
     }
@@ -59,7 +68,7 @@ async function handleWebhook(request, env) {
     await sendMessage(
       env.BOT_TOKEN,
       chatId,
-      "❌ حدث خطأ أثناء معالجة الطلب. يرجى المحاولة لاحقاً."
+      `❌ خطأ: ${err.message}`
     );
   }
 
@@ -70,10 +79,7 @@ async function sendMessage(token, chatId, text) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-    }),
+    body: JSON.stringify({ chat_id: chatId, text }),
   });
 }
 
