@@ -67,7 +67,8 @@ async function handleWebhook(request, env) {
   }
 
   const tiktokUrl = match[0];
-  await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ معالجة الرابط...");
+  const processingMsg = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ معالجة الرابط...");
+  const processingMsgId = processingMsg?.result?.message_id;
 
   try {
     const result = await getTikTokVideo(tiktokUrl);
@@ -79,7 +80,10 @@ async function handleWebhook(request, env) {
     } else {
       await sendMessage(env.BOT_TOKEN, chatId, "⚠️ تعذّر استخراج المحتوى.");
     }
+
+    if (processingMsgId) await deleteMessage(env.BOT_TOKEN, chatId, processingMsgId);
   } catch (err) {
+    if (processingMsgId) await deleteMessage(env.BOT_TOKEN, chatId, processingMsgId);
     await sendMessage(env.BOT_TOKEN, chatId, `⚠️ ${err.message}`);
   }
 
@@ -87,10 +91,19 @@ async function handleWebhook(request, env) {
 }
 
 async function sendMessage(token, chatId, text) {
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text }),
+  });
+  return await res.json();
+}
+
+async function deleteMessage(token, chatId, messageId) {
+  await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
   });
 }
 
