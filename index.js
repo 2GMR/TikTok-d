@@ -3,42 +3,26 @@ const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 // --- نظام السحب المستقر (Stable Downloader System) ---
 
 async function getTikTokVideo(tiktokUrl) {
-  // استخدام مصدر جديد ومستقر حالياً (TikWM API مع معالجة محسنة)
   try {
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`, {
-      headers: { 
-        "User-Agent": BROWSER_UA,
-        "Accept": "application/json"
-      }
+      headers: { "User-Agent": BROWSER_UA }
     });
-    
     const d = await res.json();
-    
     if (d.code === 0 && d.data) {
-      // إذا كان المحتوى عبارة عن صور (Slideshow)
-      if (d.data.images && d.data.images.length > 0) {
-        return { images: d.data.images };
-      }
-      // إذا كان فيديو
+      if (d.data.images && d.data.images.length > 0) return { images: d.data.images };
       const videoUrl = d.data.play || d.data.hdplay || d.data.wmplay;
-      if (videoUrl) {
-        return { videoUrl: videoUrl };
-      }
+      if (videoUrl) return { videoUrl };
     }
     
-    // محاولة مصدر احتياطي في حال فشل الأول
+    // محاولة مصدر احتياطي
     const backupRes = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`);
     const backupData = await backupRes.json();
     if (backupData.code === 0 && backupData.data) {
       if (backupData.data.images) return { images: backupData.data.images };
       return { videoUrl: backupData.data.play || backupData.data.hdplay };
     }
-
-  } catch (e) {
-    console.error("Extraction Error:", e);
-  }
-  
-  throw new Error("عذراً، تيك توك قام بتحديث حمايته الجغرافية. يرجى المحاولة لاحقاً أو تجربة رابط آخر.");
+  } catch (e) {}
+  throw new Error("عذراً، فشل استخراج الفيديو. يرجى التأكد من الرابط أو المحاولة لاحقاً.");
 }
 
 // --- إدارة المستخدمين والإحصائيات (Cloudflare KV) ---
@@ -80,15 +64,19 @@ async function getStats(env) {
 // --- معالجة الطلبات (Webhook) ---
 
 async function handleWebhook(request, env) {
+  // التحقق من أن الطلب POST ومن المسار الصحيح
+  const url = new URL(request.url);
+  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
   let body;
   try {
     body = await request.json();
   } catch (e) {
-    return new Response("Invalid JSON", { status: 400 });
+    return new Response("OK"); // تجاهل الطلبات غير الصحيحة
   }
   
   if (body.callback_query) return handleCallback(body.callback_query, env);
-  if (!body.message) return new Response("ok");
+  if (!body.message) return new Response("OK");
 
   const chatId = body.message.chat.id;
   const userId = body.message.from.id;
@@ -101,22 +89,22 @@ async function handleWebhook(request, env) {
   if (text.startsWith("/admin") && isAdmin) {
     const stats = await getStats(env);
     await sendMessage(env.BOT_TOKEN, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة]\n/send [ID] [الرسالة]`);
-    return new Response("ok");
+    return new Response("OK");
   }
 
   if (text.startsWith("/broadcast ") && isAdmin) {
     const msg = text.replace("/broadcast ", "");
     await sendConfirm(env, chatId, "broadcast", null, msg);
-    return new Response("ok");
+    return new Response("OK");
   }
 
   if (text.startsWith("/send ") && isAdmin) {
     const parts = text.split(" ");
-    if (parts.length < 3) return new Response("ok");
+    if (parts.length < 3) return new Response("OK");
     const targetId = parts[1];
     const msg = parts.slice(2).join(" ");
     await sendConfirm(env, chatId, "private", targetId, msg);
-    return new Response("ok");
+    return new Response("OK");
   }
 
   // معالجة روابط تيك توك
@@ -127,7 +115,7 @@ async function handleWebhook(request, env) {
     if (text.startsWith("/start")) {
       await sendMessage(env.BOT_TOKEN, chatId, "أهلاً بك! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية.");
     }
-    return new Response("ok");
+    return new Response("OK");
   }
 
   const tiktokUrl = match[0];
@@ -139,7 +127,6 @@ async function handleWebhook(request, env) {
     if (result.images) {
       await sendMediaGroup(env.BOT_TOKEN, chatId, result.images);
     } else if (result.videoUrl) {
-      // إرسال كـ Document لضمان الجودة العالية وعدم الضغط
       await sendDocument(env.BOT_TOKEN, chatId, result.videoUrl);
     }
     if (procId) await deleteMessage(env.BOT_TOKEN, chatId, procId);
@@ -148,7 +135,7 @@ async function handleWebhook(request, env) {
     await sendMessage(env.BOT_TOKEN, chatId, `⚠️ ${err.message}`);
   }
 
-  return new Response("ok");
+  return new Response("OK");
 }
 
 // --- نظام التأكيد والإرسال ---
@@ -171,7 +158,7 @@ async function handleCallback(query, env) {
 
   if (data === "conf:no") {
     await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "❌ تم إلغاء الإرسال.");
-    return new Response("ok");
+    return new Response("OK");
   }
 
   if (data.startsWith("conf:yes:")) {
@@ -182,7 +169,7 @@ async function handleCallback(query, env) {
 
     if (!msg) {
       await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "⚠️ انتهت صلاحية الجلسة.");
-      return new Response("ok");
+      return new Response("OK");
     }
 
     await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "🚀 جارٍ الإرسال...");
@@ -202,7 +189,7 @@ async function handleCallback(query, env) {
       await sendMessage(env.BOT_TOKEN, chatId, `✅ تم إرسال الإذاعة لـ ${count} مستخدم.`);
     }
   }
-  return new Response("ok");
+  return new Response("OK");
 }
 
 // --- دوال Telegram API ---
@@ -233,7 +220,6 @@ async function deleteMessage(token, chatId, messageId) {
 }
 
 async function sendDocument(token, chatId, fileUrl) {
-  // إرسال الرابط مباشرة لتيليجرام ليسحبه هو
   const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -241,7 +227,6 @@ async function sendDocument(token, chatId, fileUrl) {
   });
   const data = await res.json();
   if (!data.ok) {
-    // محاولة الإرسال كفيديو إذا فشل كملف
     await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -262,12 +247,17 @@ async function sendMediaGroup(token, chatId, images) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/webhook" && request.method === "POST") return handleWebhook(request, env);
+    // مسار الـ Webhook يجب أن يكون /webhook
+    if (url.pathname === "/webhook") {
+      return handleWebhook(request, env);
+    }
+    // مسار الإعداد
     if (url.pathname === "/setup") {
       const workerUrl = `${url.origin}/webhook`;
       const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${workerUrl}`);
-      return new Response(await res.text());
+      const data = await res.json();
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
-    return new Response("Bot is running successfully!");
+    return new Response("Bot is running!");
   },
 };
