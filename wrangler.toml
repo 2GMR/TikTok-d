@@ -2,4 +2,6 @@ name = "tkt12"
 main = "index.js"
 compatibility_date = "2024-01-01"
 
-# ملاحظة: سيتم ربط KV والمتغيرات يدوياً من لوحة تحكم Cloudflare لتجنب أخطاء النشر
+[[kv_namespaces]]
+binding = "USERS_KV"
+id = "ec73004f48cf40abbacf531d469bdf74"
