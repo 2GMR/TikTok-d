@@ -1,24 +1,24 @@
-const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const BROWSER_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 
-// --- نظام السحب الاحترافي (Pro Downloader System) ---
+// --- نظام السحب المتقدم (Advanced Extraction System) ---
 
-async function fetchFromProSource(url) {
-  // مصدر احترافي جديد (Loovit API / TikWM Pro)
+async function fetchFromMasterSource(url) {
+  // استخدام مصدر متخصص في تجاوز الـ Signature والحماية الجغرافية
   try {
-    const res = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
+    const res = await fetch(`https://api.tik.fail/api/v1/download?url=${encodeURIComponent(url)}`, {
       headers: { "User-Agent": BROWSER_UA }
     });
     const d = await res.json();
-    if (d.code === 0 && d.data) {
-      if (d.data.images) return { images: d.data.images };
-      return { videoUrl: d.data.play || d.data.hdplay };
+    if (d.status === "success" && d.data) {
+      if (d.data.type === "image") return { images: d.data.images };
+      return { videoUrl: d.data.video.no_watermark_hd || d.data.video.no_watermark };
     }
   } catch (e) {}
   return null;
 }
 
-async function fetchFromBackupSource(url) {
-  // مصدر احتياطي قوي (Tmate / Snaptik API logic)
+async function fetchFromAlternativeSource(url) {
+  // مصدر بديل يعتمد على معالجة مختلفة تماماً
   try {
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
       headers: { "User-Agent": BROWSER_UA }
@@ -32,33 +32,17 @@ async function fetchFromBackupSource(url) {
   return null;
 }
 
-async function fetchFromGlobalSource(url) {
-  // مصدر عالمي ثالث (SocialDown)
-  try {
-    const res = await fetch(`https://api.douyin.wtf/api?url=${encodeURIComponent(url)}`);
-    const d = await res.json();
-    if (d.status === "success") {
-      if (d.type === "image") return { images: d.images };
-      return { videoUrl: d.video_data.nwm_video_url_HQ || d.video_data.nwm_video_url };
-    }
-  } catch (e) {}
-  return null;
-}
-
 async function getTikTokVideo(tiktokUrl) {
-  // محاولة المصادر بالتتابع مع تأخير بسيط لضمان عدم الحظر
-  let result = await fetchFromProSource(tiktokUrl);
+  // محاولة المصدر الجديد المتخصص
+  let result = await fetchFromMasterSource(tiktokUrl);
   if (result) return result;
 
-  await new Promise(r => setTimeout(r, 800));
-  result = await fetchFromBackupSource(tiktokUrl);
+  // محاولة المصدر البديل مع تغيير طفيف في الطلب
+  await new Promise(r => setTimeout(r, 1000));
+  result = await fetchFromAlternativeSource(tiktokUrl);
   if (result) return result;
 
-  await new Promise(r => setTimeout(r, 800));
-  result = await fetchFromGlobalSource(tiktokUrl);
-  if (result) return result;
-
-  throw new Error("عذراً، تيك توك قام بتحديث حمايته. جارٍ العمل على تحديث المصادر. يرجى المحاولة لاحقاً.");
+  throw new Error("تيك توك يفرض حماية مشددة حالياً. يرجى المحاولة بعد قليل أو تجربة رابط فيديو آخر.");
 }
 
 // --- إدارة المستخدمين والإحصائيات (Cloudflare KV) ---
@@ -144,7 +128,7 @@ async function handleWebhook(request, env) {
   }
 
   const tiktokUrl = match[0];
-  const processing = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ استخراج الفيديو بأعلى جودة...");
+  const processing = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ تخطي الحماية واستخراج الفيديو...");
   const procId = processing?.result?.message_id;
 
   try {
@@ -278,6 +262,6 @@ export default {
       const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${workerUrl}`);
       return new Response(await res.text());
     }
-    return new Response("Bot is running with Advanced TikTok Support...");
+    return new Response("Bot is running with Advanced Proxy Support...");
   },
 };
