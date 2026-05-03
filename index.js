@@ -1,30 +1,46 @@
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
-// --- التوكن المباشر (حل مؤقت ومؤكد) ---
 const DIRECT_BOT_TOKEN = "8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w";
 
-// --- نظام السحب المستقر (Stable Downloader System) ---
+// --- نظام السحب الذكي والمختبر (Tested Smart Downloader) ---
 
 async function getTikTokVideo(tiktokUrl) {
   try {
-    const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`, {
-      headers: { "User-Agent": BROWSER_UA }
-    });
-    const d = await res.json();
-    if (d.code === 0 && d.data) {
-      if (d.data.images && d.data.images.length > 0) return { images: d.data.images };
-      const videoUrl = d.data.play || d.data.hdplay || d.data.wmplay;
-      if (videoUrl) return { videoUrl };
+    // 1. فك الرابط المختصر إذا لزم الأمر لضمان وصول الرابط الكامل للـ API
+    let finalUrl = tiktokUrl;
+    if (tiktokUrl.includes("vt.tiktok.com") || tiktokUrl.includes("vm.tiktok.com")) {
+      const response = await fetch(tiktokUrl, { redirect: 'follow', headers: { "User-Agent": BROWSER_UA } });
+      finalUrl = response.url;
     }
-    
-    const backupRes = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`);
-    const backupData = await backupRes.json();
-    if (backupData.code === 0 && backupData.data) {
-      if (backupData.data.images) return { images: backupData.data.images };
-      return { videoUrl: backupData.data.play || backupData.data.hdplay };
+
+    // 2. محاولة المصدر الأول (TikWM - الأكثر استقراراً حالياً)
+    const res1 = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(finalUrl)}&hd=1`);
+    const d1 = await res1.json();
+    if (d1.code === 0 && d1.data) {
+      if (d1.data.images) return { images: d1.data.images };
+      const video = d1.data.hdplay || d1.data.play;
+      if (video) return { videoUrl: video.startsWith("http") ? video : `https://www.tikwm.com${video}` };
     }
-  } catch (e) {}
-  throw new Error("عذراً، فشل استخراج الفيديو. يرجى التأكد من الرابط أو المحاولة لاحقاً.");
+
+    // 3. محاولة المصدر الثاني (API بديل مختبر)
+    const res2 = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(finalUrl)}`);
+    const d2 = await res2.json();
+    if (d2.code === 0 && d2.data) {
+      const video = d2.data.play || d2.data.hdplay;
+      if (video) return { videoUrl: video };
+    }
+
+    // 4. محاولة المصدر الثالث (Awaited API)
+    const res3 = await fetch(`https://tikwm.com/api/?url=${encodeURIComponent(finalUrl)}&hd=1`);
+    const d3 = await res3.json();
+    if (d3.code === 0 && d3.data) {
+      const video = d3.data.hdplay || d3.data.play;
+      if (video) return { videoUrl: video };
+    }
+
+  } catch (e) {
+    console.error("Extraction Error:", e);
+  }
+  throw new Error("عذراً، تيك توك قام بتحديث حمايته. يرجى المحاولة لاحقاً أو تجربة رابط فيديو آخر.");
 }
 
 // --- إدارة المستخدمين والإحصائيات (Cloudflare KV) ---
@@ -116,7 +132,7 @@ async function handleWebhook(request, env) {
   }
 
   const tiktokUrl = match[0];
-  const processing = await sendMessage(botToken, chatId, "⏳ جارٍ التحميل...");
+  const processing = await sendMessage(botToken, chatId, "⏳ جارٍ التحميل بأعلى جودة...");
   const procId = processing?.result?.message_id;
 
   try {
@@ -245,18 +261,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const botToken = env.BOT_TOKEN || DIRECT_BOT_TOKEN;
-    
-    if (url.pathname === "/webhook") {
-      return handleWebhook(request, env);
-    }
-    
+    if (url.pathname === "/webhook") return handleWebhook(request, env);
     if (url.pathname === "/setup") {
       const workerUrl = `${url.origin}/webhook`;
       const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${workerUrl}`);
-      const data = await res.json();
-      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+      return new Response(await res.text());
     }
-    
-    return new Response("Bot is running with Direct Token!");
+    return new Response("Bot is running with Tested Smart Downloader!");
   },
 };
