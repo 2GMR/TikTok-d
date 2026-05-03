@@ -1,3 +1,11 @@
 name = "tkt12"
 main = "index.js"
 compatibility_date = "2024-01-01"
+
+[vars]
+# ADMIN_ID = "رقم_الآيدي_الخاص_بك"
+# BOT_TOKEN = "توكن_البوت"
+
+[[kv_namespaces]]
+binding = "USERS_KV"
+id = "سيتم_استبداله_بمعرف_KV_الخاص_بك"
