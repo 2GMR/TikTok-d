@@ -1,50 +1,12 @@
+const API_SERVER = "https://d32ca79a-8423-460b-872a-fac150ad3deb-00-2ty54b8u5mp8w.sisko.replit.dev/api/tiktok";
+
 async function getTikTokVideo(tiktokUrl) {
-  const res = await fetch("https://api.tikmate.app/api/lookup", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-      "Referer": "https://tikmate.app/",
-    },
-    body: new URLSearchParams({ url: tiktokUrl }).toString(),
-  });
-
-  const data = await res.json();
-
-  if (!data.success || !data.token || !data.id) {
-    const fallback = await getTikTokVideoFallback(tiktokUrl);
-    return fallback;
+  const res = await fetch(`${API_SERVER}?url=${encodeURIComponent(tiktokUrl)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `API error: ${res.status}`);
   }
-
-  return {
-    videoUrl: `https://tikmate.app/download/${data.token}/${data.id}.mp4`,
-    title: data.desc || "",
-    author: data.author_name || "",
-  };
-}
-
-async function getTikTokVideoFallback(tiktokUrl) {
-  const res = await fetch(
-    `https://www.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`,
-    {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-        "Accept": "application/json",
-        "Referer": "https://www.tikwm.com/",
-      },
-    }
-  );
-  const data = await res.json();
-
-  if (!data || data.code !== 0 || !data.data) {
-    throw new Error(`فشل كل الـ APIs. كود tikwm: ${data?.code} | ${data?.msg}`);
-  }
-
-  return {
-    videoUrl: data.data.hdplay || data.data.play,
-    title: data.data.title || "",
-    author: data.data.author?.nickname || "",
-  };
+  return await res.json();
 }
 
 async function handleWebhook(request, env) {
