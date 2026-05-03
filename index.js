@@ -1,17 +1,40 @@
-const API_SERVER = "https://d32ca79a-8423-460b-872a-fac150ad3deb-00-2ty54b8u5mp8w.sisko.replit.dev/api/tiktok";
+const REPLIT_API = "https://d32ca79a-8423-460b-872a-fac150ad3deb-00-2ty54b8u5mp8w.sisko.replit.dev/api/tiktok";
+const TIKWM_API = "https://www.tikwm.com/api/";
+
+const BROWSER_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
 async function getTikTokVideo(tiktokUrl) {
-  const res = await fetch(`${API_SERVER}?url=${encodeURIComponent(tiktokUrl)}`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `API error: ${res.status}`);
+  // --- محاولة 1: tikwm مباشرة ---
+  try {
+    const r1 = await fetch(
+      `${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`,
+      { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.tikwm.com/" } }
+    );
+    const d1 = await r1.json();
+    if (d1.code === 0 && d1.data) {
+      const images = d1.data.images;
+      if (images && images.length > 0) return { images };
+      return { videoUrl: d1.data.play || d1.data.hdplay };
+    }
+  } catch (_) {}
+
+  // --- محاولة 2: عبر API server الخاص ---
+  const r2 = await fetch(`${REPLIT_API}?url=${encodeURIComponent(tiktokUrl)}`, {
+    headers: {
+      "User-Agent": BROWSER_UA,
+      Accept: "application/json",
+    },
+  });
+  if (!r2.ok) {
+    const err = await r2.json().catch(() => ({}));
+    throw new Error(err.error || `فشل الاتصال بالسيرفر (${r2.status})`);
   }
-  return await res.json();
+  return await r2.json();
 }
 
 async function handleWebhook(request, env) {
   const body = await request.json();
-
   if (!body.message) return new Response("ok");
 
   const chatId = body.message.chat.id;
@@ -25,10 +48,10 @@ async function handleWebhook(request, env) {
       await sendMessage(
         env.BOT_TOKEN,
         chatId,
-        "أهلاً! 👋\nأرسل لي رابط فيديو أو صورة تيك توك وسأرسله لك بجودة أصلية وبدون علامة مائية 🎬🖼️"
+        "أهلاً! 👋\nأرسل لي رابط فيديو أو صور من تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية 🎬🖼️"
       );
     } else {
-      await sendMessage(env.BOT_TOKEN, chatId, "❗ يرجى إرسال رابط تيك توك صحيح.");
+      await sendMessage(env.BOT_TOKEN, chatId, "❗ أرسل رابط تيك توك صحيح.");
     }
     return new Response("ok");
   }
@@ -62,11 +85,15 @@ async function sendMessage(token, chatId, text) {
 }
 
 async function sendVideo(token, chatId, fileUrl) {
-  await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, video: fileUrl }),
+    body: JSON.stringify({ chat_id: chatId, video: fileUrl, supports_streaming: true }),
   });
+  const data = await res.json();
+  if (!data.ok) {
+    await sendMessage(token, chatId, `⚠️ فشل إرسال الفيديو: ${data.description}`);
+  }
 }
 
 async function sendMediaGroup(token, chatId, images) {
@@ -95,14 +122,8 @@ async function setWebhook(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (url.pathname === "/webhook" && request.method === "POST") {
-      return handleWebhook(request, env);
-    }
-    if (url.pathname === "/setup" && request.method === "GET") {
-      return setWebhook(request, env);
-    }
-
+    if (url.pathname === "/webhook" && request.method === "POST") return handleWebhook(request, env);
+    if (url.pathname === "/setup" && request.method === "GET") return setWebhook(request, env);
     return new Response("🤖 بوت تيك توك يعمل بنجاح!", { status: 200 });
   },
 };
