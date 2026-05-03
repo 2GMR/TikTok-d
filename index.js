@@ -4,33 +4,43 @@ const TIKWM_API = "https://www.tikwm.com/api/";
 const BROWSER_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
+async function tryTikwm(tiktokUrl) {
+  const r = await fetch(
+    `${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`,
+    { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.tikwm.com/" } }
+  );
+  const d = await r.json();
+  if (d.code === 0 && d.data) {
+    const images = d.data.images;
+    if (images && images.length > 0) return { images };
+    return { videoUrl: d.data.play || d.data.hdplay };
+  }
+  return null;
+}
+
 async function getTikTokVideo(tiktokUrl) {
-  // --- محاولة 1: tikwm مباشرة ---
+  // محاولة 1: tikwm مباشرة
   try {
-    const r1 = await fetch(
-      `${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`,
-      { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.tikwm.com/" } }
-    );
-    const d1 = await r1.json();
-    if (d1.code === 0 && d1.data) {
-      const images = d1.data.images;
-      if (images && images.length > 0) return { images };
-      return { videoUrl: d1.data.play || d1.data.hdplay };
-    }
+    const res = await tryTikwm(tiktokUrl);
+    if (res) return res;
   } catch (_) {}
 
-  // --- محاولة 2: عبر API server الخاص ---
-  const r2 = await fetch(`${REPLIT_API}?url=${encodeURIComponent(tiktokUrl)}`, {
-    headers: {
-      "User-Agent": BROWSER_UA,
-      Accept: "application/json",
-    },
+  // محاولة 2: tikwm مرة ثانية (IP مختلف أحياناً)
+  await new Promise((r) => setTimeout(r, 800));
+  try {
+    const res = await tryTikwm(tiktokUrl);
+    if (res) return res;
+  } catch (_) {}
+
+  // محاولة 3: عبر API server الخاص
+  const r3 = await fetch(`${REPLIT_API}?url=${encodeURIComponent(tiktokUrl)}`, {
+    headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
   });
-  if (!r2.ok) {
-    const err = await r2.json().catch(() => ({}));
-    throw new Error(err.error || `فشل الاتصال بالسيرفر (${r2.status})`);
+  if (!r3.ok) {
+    const err = await r3.json().catch(() => ({}));
+    throw new Error(err.error || `فشل الاتصال بالسيرفر (${r3.status})`);
   }
-  return await r2.json();
+  return await r3.json();
 }
 
 async function handleWebhook(request, env) {
