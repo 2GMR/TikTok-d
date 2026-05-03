@@ -25,10 +25,10 @@ async function handleWebhook(request, env) {
       await sendMessage(
         env.BOT_TOKEN,
         chatId,
-        "أهلاً! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة أصلية وبدون علامة مائية 🎬"
+        "أهلاً! 👋\nأرسل لي رابط فيديو أو صورة تيك توك وسأرسله لك بجودة أصلية وبدون علامة مائية 🎬🖼️"
       );
     } else {
-      await sendMessage(env.BOT_TOKEN, chatId, "❗ يرجى إرسال رابط فيديو تيك توك صحيح.");
+      await sendMessage(env.BOT_TOKEN, chatId, "❗ يرجى إرسال رابط تيك توك صحيح.");
     }
     return new Response("ok");
   }
@@ -37,9 +37,15 @@ async function handleWebhook(request, env) {
   await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ معالجة الرابط...");
 
   try {
-    const { videoUrl, title, author } = await getTikTokVideo(tiktokUrl);
-    const caption = (title ? `📝 ${title}\n` : "") + (author ? `👤 ${author}` : "");
-    await sendDocument(env.BOT_TOKEN, chatId, videoUrl, caption);
+    const result = await getTikTokVideo(tiktokUrl);
+
+    if (result.images && result.images.length > 0) {
+      await sendMediaGroup(env.BOT_TOKEN, chatId, result.images);
+    } else if (result.videoUrl) {
+      await sendVideo(env.BOT_TOKEN, chatId, result.videoUrl);
+    } else {
+      await sendMessage(env.BOT_TOKEN, chatId, "⚠️ تعذّر استخراج المحتوى.");
+    }
   } catch (err) {
     await sendMessage(env.BOT_TOKEN, chatId, `⚠️ ${err.message}`);
   }
@@ -55,11 +61,20 @@ async function sendMessage(token, chatId, text) {
   });
 }
 
-async function sendDocument(token, chatId, fileUrl, caption) {
-  await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+async function sendVideo(token, chatId, fileUrl) {
+  await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, document: fileUrl, caption }),
+    body: JSON.stringify({ chat_id: chatId, video: fileUrl }),
+  });
+}
+
+async function sendMediaGroup(token, chatId, images) {
+  const media = images.map((url) => ({ type: "photo", media: url }));
+  await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, media }),
   });
 }
 
