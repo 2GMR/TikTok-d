@@ -1,34 +1,66 @@
-const TIKWM_API = "https://www.tikwm.com/api/";
 const BROWSER_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
-// --- الدوال المساعدة لسحب الفيديو ---
+// --- نظام السحب متعدد المصادر (Multi-Source System) ---
 
-async function tryTikwm(tiktokUrl) {
+async function fetchFromSource1(url) {
+  // المصدر الأول: TikWM (الرئيسي)
   try {
-    const r = await fetch(`${TIKWM_API}?url=${encodeURIComponent(tiktokUrl)}&hd=1`, {
-      headers: { "User-Agent": BROWSER_UA, Referer: "https://www.tikwm.com/" }
+    const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
+      headers: { "User-Agent": BROWSER_UA }
     });
-    const d = await r.json();
+    const d = await res.json();
     if (d.code === 0 && d.data) {
-      const images = d.data.images;
-      if (images && images.length > 0) return { images };
+      if (d.data.images) return { images: d.data.images };
       return { videoUrl: d.data.play || d.data.hdplay };
     }
   } catch (e) {}
   return null;
 }
 
+async function fetchFromSource2(url) {
+  // المصدر الثاني: TikWM البديل (عبر نطاق مختلف)
+  try {
+    const res = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
+      headers: { "User-Agent": BROWSER_UA }
+    });
+    const d = await res.json();
+    if (d.code === 0 && d.data) {
+      if (d.data.images) return { images: d.data.images };
+      return { videoUrl: d.data.play || d.data.hdplay };
+    }
+  } catch (e) {}
+  return null;
+}
+
+async function fetchFromSource3(url) {
+  // المصدر الثالث: API خارجي آخر (TiktokAPI)
+  try {
+    const res = await fetch(`https://api.douyin.wtf/api?url=${encodeURIComponent(url)}`);
+    const d = await res.json();
+    if (d.status === "success") {
+      if (d.type === "image") return { images: d.images };
+      return { videoUrl: d.video_data.nwm_video_url_HQ || d.video_data.nwm_video_url };
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function getTikTokVideo(tiktokUrl) {
-  // محاولة سحب الفيديو من tikwm
-  let res = await tryTikwm(tiktokUrl);
-  if (res) return res;
+  // محاولة المصدر الأول
+  let result = await fetchFromSource1(tiktokUrl);
+  if (result) return result;
 
-  // محاولة ثانية بعد تأخير بسيط في حال الفشل
-  await new Promise((r) => setTimeout(r, 1000));
-  res = await tryTikwm(tiktokUrl);
-  if (res) return res;
+  // محاولة المصدر الثاني (بعد تأخير بسيط)
+  await new Promise(r => setTimeout(r, 500));
+  result = await fetchFromSource2(tiktokUrl);
+  if (result) return result;
 
-  throw new Error("فشل استخراج الفيديو من تيك توك. قد يكون الرابط غير صحيح أو الخدمة متوقفة مؤقتاً.");
+  // محاولة المصدر الثالث (الاحتياطي الأخير)
+  await new Promise(r => setTimeout(r, 500));
+  result = await fetchFromSource3(tiktokUrl);
+  if (result) return result;
+
+  throw new Error("عذراً، جميع مصادر السحب متوقفة حالياً. يرجى المحاولة لاحقاً أو التأكد من أن الفيديو ليس خاصاً.");
 }
 
 // --- إدارة المستخدمين والإحصائيات (Cloudflare KV) ---
@@ -36,21 +68,19 @@ async function getTikTokVideo(tiktokUrl) {
 async function trackUser(env, userId) {
   if (!env.USERS_KV) return;
   const now = new Date();
-  const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const month = today.substring(0, 7); // YYYY-MM
+  const today = now.toISOString().split('T')[0];
+  const month = today.substring(0, 7);
 
-  // حفظ الـ ID إذا كان جديداً
-  const userExists = await env.USERS_KV.get(`user:${userId}`);
+  const userKey = `user:${userId}`;
+  const userExists = await env.USERS_KV.get(userKey);
   if (!userExists) {
-    await env.USERS_KV.put(`user:${userId}`, JSON.stringify({ joined: today }));
-    // زيادة عداد الإجمالي
+    await env.USERS_KV.put(userKey, JSON.stringify({ joined: today }));
     const total = parseInt(await env.USERS_KV.get("stats:total") || "0");
     await env.USERS_KV.put("stats:total", (total + 1).toString());
   }
 
-  // تحديث النشاط اليومي والشهري
-  await env.USERS_KV.put(`active:day:${today}:${userId}`, "1", { expirationTtl: 86400 * 2 });
-  await env.USERS_KV.put(`active:month:${month}:${userId}`, "1", { expirationTtl: 86400 * 32 });
+  await env.USERS_KV.put(`active:day:${today}:${userId}`, "1", { expirationTtl: 172800 });
+  await env.USERS_KV.put(`active:month:${month}:${userId}`, "1", { expirationTtl: 2764800 });
 }
 
 async function getStats(env) {
@@ -60,8 +90,6 @@ async function getStats(env) {
   const month = today.substring(0, 7);
 
   const total = await env.USERS_KV.get("stats:total") || "0";
-  
-  // حساب النشاط (عبر البحث عن المفاتيح)
   const dailyList = await env.USERS_KV.list({ prefix: `active:day:${today}:` });
   const monthlyList = await env.USERS_KV.list({ prefix: `active:month:${month}:` });
 
@@ -76,11 +104,7 @@ async function getStats(env) {
 async function handleWebhook(request, env) {
   const body = await request.json();
   
-  // معالجة الضغط على الأزرار (Callback Query)
-  if (body.callback_query) {
-    return handleCallback(body.callback_query, env);
-  }
-
+  if (body.callback_query) return handleCallback(body.callback_query, env);
   if (!body.message) return new Response("ok");
 
   const chatId = body.message.chat.id;
@@ -88,13 +112,11 @@ async function handleWebhook(request, env) {
   const text = body.message.text || "";
   const isAdmin = userId.toString() === env.ADMIN_ID;
 
-  // تسجيل المستخدم
   await trackUser(env, userId);
 
-  // أوامر المدير
   if (text.startsWith("/admin") && isAdmin) {
     const stats = await getStats(env);
-    await sendMessage(env.BOT_TOKEN, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة] - إرسال للجميع\n/send [ID] [الرسالة] - إرسال لشخص`);
+    await sendMessage(env.BOT_TOKEN, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة]\n/send [ID] [الرسالة]`);
     return new Response("ok");
   }
 
@@ -113,7 +135,6 @@ async function handleWebhook(request, env) {
     return new Response("ok");
   }
 
-  // معالجة روابط تيك توك
   const tiktokRegex = /https?:\/\/(www\.|vm\.|vt\.)?tiktok\.com\/[^\s]+/i;
   const match = text.match(tiktokRegex);
 
@@ -125,7 +146,7 @@ async function handleWebhook(request, env) {
   }
 
   const tiktokUrl = match[0];
-  const processing = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ التحميل...");
+  const processing = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ التحميل من أفضل مصدر متاح...");
   const procId = processing?.result?.message_id;
 
   try {
@@ -133,7 +154,6 @@ async function handleWebhook(request, env) {
     if (result.images) {
       await sendMediaGroup(env.BOT_TOKEN, chatId, result.images);
     } else if (result.videoUrl) {
-      // إرسال كـ Document لضمان عدم الضغط والجودة العالية
       await sendDocument(env.BOT_TOKEN, chatId, result.videoUrl);
     }
     if (procId) await deleteMessage(env.BOT_TOKEN, chatId, procId);
@@ -148,8 +168,7 @@ async function handleWebhook(request, env) {
 // --- نظام التأكيد والإرسال ---
 
 async function sendConfirm(env, chatId, type, targetId, msg) {
-  const data = JSON.stringify({ t: type, id: targetId, m: msg });
-  // تخزين مؤقت للرسالة في KV للتأكيد (اختياري، هنا سنضعها في الـ callback data إذا كانت قصيرة أو نكتفي بالواجهة)
+  if (env.USERS_KV) await env.USERS_KV.put(`temp_msg:${chatId}`, msg, { expirationTtl: 600 });
   await sendMessage(env.BOT_TOKEN, chatId, `❓ هل أنت متأكد من إرسال الرسالة التالية؟\n\n"${msg}"`, {
     reply_markup: {
       inline_keyboard: [[
@@ -158,11 +177,6 @@ async function sendConfirm(env, chatId, type, targetId, msg) {
       ]]
     }
   });
-  // ملاحظة: الـ callback_data لها حد 64 بايت، لذا في الإنتاج يفضل حفظ الرسالة في KV واستخدام مفتاحها هنا.
-  // للتبسيط، سنفترض أن المدير سيعيد كتابة الأمر إذا كانت الرسالة طويلة جداً، أو سنحفظها في KV.
-  if (env.USERS_KV) {
-    await env.USERS_KV.put(`temp_msg:${chatId}`, msg, { expirationTtl: 600 });
-  }
 }
 
 async function handleCallback(query, env) {
@@ -197,7 +211,7 @@ async function handleCallback(query, env) {
         const uid = key.name.split(":")[1];
         await sendMessage(env.BOT_TOKEN, uid, msg);
         count++;
-        if (count % 20 === 0) await new Promise(r => setTimeout(r, 1000)); // تجنب الحظر
+        if (count % 25 === 0) await new Promise(r => setTimeout(r, 1000));
       }
       await sendMessage(env.BOT_TOKEN, chatId, `✅ تم إرسال الإذاعة لـ ${count} مستخدم.`);
     }
@@ -233,7 +247,6 @@ async function deleteMessage(token, chatId, messageId) {
 }
 
 async function sendDocument(token, chatId, fileUrl) {
-  // إرسال الرابط مباشرة لتيليجرام ليسحبه هو
   const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -241,7 +254,6 @@ async function sendDocument(token, chatId, fileUrl) {
   });
   const data = await res.json();
   if (!data.ok) {
-    // محاولة الإرسال كفيديو إذا فشل كملف
     await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -268,6 +280,6 @@ export default {
       const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${workerUrl}`);
       return new Response(await res.text());
     }
-    return new Response("Bot is running...");
+    return new Response("Bot is running with Multi-Source Support...");
   },
 };
