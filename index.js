@@ -1,5 +1,8 @@
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// --- التوكن المباشر (حل مؤقت ومؤكد) ---
+const DIRECT_BOT_TOKEN = "8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w";
+
 // --- نظام السحب المستقر (Stable Downloader System) ---
 
 async function getTikTokVideo(tiktokUrl) {
@@ -14,7 +17,6 @@ async function getTikTokVideo(tiktokUrl) {
       if (videoUrl) return { videoUrl };
     }
     
-    // محاولة مصدر احتياطي
     const backupRes = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}&hd=1`);
     const backupData = await backupRes.json();
     if (backupData.code === 0 && backupData.data) {
@@ -64,18 +66,15 @@ async function getStats(env) {
 // --- معالجة الطلبات (Webhook) ---
 
 async function handleWebhook(request, env) {
-  // التحقق من أن الطلب POST ومن المسار الصحيح
-  const url = new URL(request.url);
-  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
-
+  const botToken = env.BOT_TOKEN || DIRECT_BOT_TOKEN;
   let body;
   try {
     body = await request.json();
   } catch (e) {
-    return new Response("OK"); // تجاهل الطلبات غير الصحيحة
+    return new Response("OK");
   }
   
-  if (body.callback_query) return handleCallback(body.callback_query, env);
+  if (body.callback_query) return handleCallback(body.callback_query, env, botToken);
   if (!body.message) return new Response("OK");
 
   const chatId = body.message.chat.id;
@@ -85,16 +84,15 @@ async function handleWebhook(request, env) {
 
   await trackUser(env, userId);
 
-  // أوامر المدير
   if (text.startsWith("/admin") && isAdmin) {
     const stats = await getStats(env);
-    await sendMessage(env.BOT_TOKEN, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة]\n/send [ID] [الرسالة]`);
+    await sendMessage(botToken, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة]\n/send [ID] [الرسالة]`);
     return new Response("OK");
   }
 
   if (text.startsWith("/broadcast ") && isAdmin) {
     const msg = text.replace("/broadcast ", "");
-    await sendConfirm(env, chatId, "broadcast", null, msg);
+    await sendConfirm(botToken, env, chatId, "broadcast", null, msg);
     return new Response("OK");
   }
 
@@ -103,36 +101,35 @@ async function handleWebhook(request, env) {
     if (parts.length < 3) return new Response("OK");
     const targetId = parts[1];
     const msg = parts.slice(2).join(" ");
-    await sendConfirm(env, chatId, "private", targetId, msg);
+    await sendConfirm(botToken, env, chatId, "private", targetId, msg);
     return new Response("OK");
   }
 
-  // معالجة روابط تيك توك
   const tiktokRegex = /https?:\/\/(www\.|vm\.|vt\.)?tiktok\.com\/[^\s]+/i;
   const match = text.match(tiktokRegex);
 
   if (!match) {
     if (text.startsWith("/start")) {
-      await sendMessage(env.BOT_TOKEN, chatId, "أهلاً بك! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية.");
+      await sendMessage(botToken, chatId, "أهلاً بك! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية.");
     }
     return new Response("OK");
   }
 
   const tiktokUrl = match[0];
-  const processing = await sendMessage(env.BOT_TOKEN, chatId, "⏳ جارٍ التحميل...");
+  const processing = await sendMessage(botToken, chatId, "⏳ جارٍ التحميل...");
   const procId = processing?.result?.message_id;
 
   try {
     const result = await getTikTokVideo(tiktokUrl);
     if (result.images) {
-      await sendMediaGroup(env.BOT_TOKEN, chatId, result.images);
+      await sendMediaGroup(botToken, chatId, result.images);
     } else if (result.videoUrl) {
-      await sendDocument(env.BOT_TOKEN, chatId, result.videoUrl);
+      await sendDocument(botToken, chatId, result.videoUrl);
     }
-    if (procId) await deleteMessage(env.BOT_TOKEN, chatId, procId);
+    if (procId) await deleteMessage(botToken, chatId, procId);
   } catch (err) {
-    if (procId) await deleteMessage(env.BOT_TOKEN, chatId, procId);
-    await sendMessage(env.BOT_TOKEN, chatId, `⚠️ ${err.message}`);
+    if (procId) await deleteMessage(botToken, chatId, procId);
+    await sendMessage(botToken, chatId, `⚠️ ${err.message}`);
   }
 
   return new Response("OK");
@@ -140,9 +137,9 @@ async function handleWebhook(request, env) {
 
 // --- نظام التأكيد والإرسال ---
 
-async function sendConfirm(env, chatId, type, targetId, msg) {
+async function sendConfirm(token, env, chatId, type, targetId, msg) {
   if (env.USERS_KV) await env.USERS_KV.put(`temp_msg:${chatId}`, msg, { expirationTtl: 600 });
-  await sendMessage(env.BOT_TOKEN, chatId, `❓ هل أنت متأكد من إرسال الرسالة التالية؟\n\n"${msg}"`, {
+  await sendMessage(token, chatId, `❓ هل أنت متأكد من إرسال الرسالة التالية؟\n\n"${msg}"`, {
     reply_markup: {
       inline_keyboard: [[
         { text: "✅ تأكيد", callback_data: `conf:yes:${type}:${targetId || '0'}` },
@@ -152,12 +149,12 @@ async function sendConfirm(env, chatId, type, targetId, msg) {
   });
 }
 
-async function handleCallback(query, env) {
+async function handleCallback(query, env, token) {
   const chatId = query.message.chat.id;
   const data = query.data;
 
   if (data === "conf:no") {
-    await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "❌ تم إلغاء الإرسال.");
+    await editMessage(token, chatId, query.message.message_id, "❌ تم إلغاء الإرسال.");
     return new Response("OK");
   }
 
@@ -168,25 +165,25 @@ async function handleCallback(query, env) {
     const msg = await env.USERS_KV.get(`temp_msg:${chatId}`);
 
     if (!msg) {
-      await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "⚠️ انتهت صلاحية الجلسة.");
+      await editMessage(token, chatId, query.message.message_id, "⚠️ انتهت صلاحية الجلسة.");
       return new Response("OK");
     }
 
-    await editMessage(env.BOT_TOKEN, chatId, query.message.message_id, "🚀 جارٍ الإرسال...");
+    await editMessage(token, chatId, query.message.message_id, "🚀 جارٍ الإرسال...");
 
     if (type === "private") {
-      const res = await sendMessage(env.BOT_TOKEN, targetId, msg);
-      await sendMessage(env.BOT_TOKEN, chatId, res.ok ? "✅ تم الإرسال بنجاح." : `❌ فشل الإرسال: ${res.description}`);
+      const res = await sendMessage(token, targetId, msg);
+      await sendMessage(token, chatId, res.ok ? "✅ تم الإرسال بنجاح." : `❌ فشل الإرسال: ${res.description}`);
     } else if (type === "broadcast") {
       const users = await env.USERS_KV.list({ prefix: "user:" });
       let count = 0;
       for (const key of users.keys) {
         const uid = key.name.split(":")[1];
-        await sendMessage(env.BOT_TOKEN, uid, msg);
+        await sendMessage(token, uid, msg);
         count++;
         if (count % 25 === 0) await new Promise(r => setTimeout(r, 1000));
       }
-      await sendMessage(env.BOT_TOKEN, chatId, `✅ تم إرسال الإذاعة لـ ${count} مستخدم.`);
+      await sendMessage(token, chatId, `✅ تم إرسال الإذاعة لـ ${count} مستخدم.`);
     }
   }
   return new Response("OK");
@@ -247,17 +244,19 @@ async function sendMediaGroup(token, chatId, images) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // مسار الـ Webhook يجب أن يكون /webhook
+    const botToken = env.BOT_TOKEN || DIRECT_BOT_TOKEN;
+    
     if (url.pathname === "/webhook") {
       return handleWebhook(request, env);
     }
-    // مسار الإعداد
+    
     if (url.pathname === "/setup") {
       const workerUrl = `${url.origin}/webhook`;
-      const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${workerUrl}`);
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${workerUrl}`);
       const data = await res.json();
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
-    return new Response("Bot is running!");
+    
+    return new Response("Bot is running with Direct Token!");
   },
 };
