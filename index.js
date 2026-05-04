@@ -30,16 +30,16 @@ async function handleMessage(message, env) {
   if (env.USERS_KV) { await updateStats(userId, env.USERS_KV); }
   if (text === "/start") { return await sendMessage(chatId, token, "welcome! send me a tiktok link."); }
   if (text.startsWith("/admin") && userId === adminId) { return await sendAdminPanel(chatId, token, env.USERS_KV); }
-  const tiktokRegex = /https?:\/\/(www\.|v[tm]\.)?tiktok\.com\/[@a-zA-Z0-9._\-\/]+/g;
+  const tiktokRegex = /https?:\/\/(www\.|vm\.|vt\.)?tiktok\.com\/[@a-zA-Z0-9._\-\/]+/g;
   const match = text.match(tiktokRegex);
   if (match) {
     const tiktokUrl = match[0];
     await sendMessage(chatId, token, "processing...");
     let data = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       data = await fetchVideoData(tiktokUrl);
       if (data) break;
-      await new Promise(function(r) { setTimeout(r, 1500); });
+      await new Promise(function(r) { setTimeout(r, 2000); });
     }
     if (!data) { return await sendMessage(chatId, token, "failed to extract link."); }
     if (data.images && data.images.length > 0) {
@@ -61,21 +61,54 @@ async function handleMessage(message, env) {
 }
 
 async function fetchVideoData(url) {
-  const apis = [
-    "https://api.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
-    "https://www.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
+  const result = await fetchFromTikwm(url);
+  if (result) return result;
+  return null;
+}
+
+async function fetchFromTikwm(url) {
+  const endpoints = [
+    {
+      url: "https://api.tikwm.com/api/",
+      method: "POST",
+      body: "url=" + encodeURIComponent(url) + "&hd=1",
+    },
+    {
+      url: "https://api.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
+      method: "GET",
+      body: null,
+    },
+    {
+      url: "https://www.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
+      method: "GET",
+      body: null,
+    },
   ];
-  for (const api of apis) {
+
+  for (const ep of endpoints) {
     try {
-      const res = await fetch(api, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } });
+      const options = {
+        method: ep.method,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+          "Accept": "application/json, text/plain, */*",
+          "Referer": "https://www.tiktok.com/",
+          "Origin": "https://www.tiktok.com",
+        },
+      };
+      if (ep.body) {
+        options.headers["Content-Type"] = "application/x-www-form-urlencoded";
+        options.body = ep.body;
+      }
+      const res = await fetch(ep.url, options);
       if (!res.ok) continue;
       const json = await res.json();
       if (json.code !== 0 || !json.data) continue;
       const d = json.data;
       const images = Array.isArray(d.images) && d.images.length > 0 ? d.images : [];
       const urls = [];
-      if (d.play) urls.push(d.play);
       if (d.hdplay) urls.push(d.hdplay);
+      if (d.play) urls.push(d.play);
       if (d.wmplay) urls.push(d.wmplay);
       if (urls.length === 0 && images.length === 0) continue;
       return {
@@ -87,7 +120,7 @@ async function fetchVideoData(url) {
         height: d.height || 0,
         duration: d.duration || 0,
       };
-    } catch (e) { console.error("API failed:", e.message); }
+    } catch (e) { console.error("tikwm endpoint failed:", e.message); }
   }
   return null;
 }
