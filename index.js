@@ -21,6 +21,19 @@ export default {
   },
 };
 
+async function expandUrl(shortUrl) {
+  try {
+    const res = await fetch(shortUrl, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    });
+    return res.url || shortUrl;
+  } catch (e) {
+    return shortUrl;
+  }
+}
+
 async function handleMessage(message, env) {
   const chatId = message.chat.id;
   const text = message.text || "";
@@ -33,8 +46,13 @@ async function handleMessage(message, env) {
   const tiktokRegex = /https?:\/\/(www\.|v[tm]\.)?tiktok\.com\/[@a-zA-Z0-9._\-\/]+/g;
   const match = text.match(tiktokRegex);
   if (match) {
-    const tiktokUrl = match[0];
+    const shortUrl = match[0];
     await sendMessage(chatId, token, "processing...");
+
+    // توسيع الرابط القصير أولاً
+    const tiktokUrl = await expandUrl(shortUrl);
+    console.log("Expanded URL:", tiktokUrl);
+
     let data = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       data = await fetchVideoData(tiktokUrl);
@@ -61,14 +79,10 @@ async function handleMessage(message, env) {
 }
 
 async function fetchVideoData(url) {
-  // أولاً نجرب tikwm لأنه يدعم الصور أيضاً
   const tikwmResult = await fetchFromTikwm(url);
   if (tikwmResult) return tikwmResult;
-
-  // ثانياً نجرب lovetik
   const lovetikResult = await fetchFromLovetik(url);
   if (lovetikResult) return lovetikResult;
-
   return null;
 }
 
