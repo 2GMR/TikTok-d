@@ -21,19 +21,6 @@ export default {
   },
 };
 
-async function expandUrl(shortUrl) {
-  try {
-    const res = await fetch(shortUrl, {
-      method: "HEAD",
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    });
-    return res.url || shortUrl;
-  } catch (e) {
-    return shortUrl;
-  }
-}
-
 async function handleMessage(message, env) {
   const chatId = message.chat.id;
   const text = message.text || "";
@@ -46,13 +33,8 @@ async function handleMessage(message, env) {
   const tiktokRegex = /https?:\/\/(www\.|v[tm]\.)?tiktok\.com\/[@a-zA-Z0-9._\-\/]+/g;
   const match = text.match(tiktokRegex);
   if (match) {
-    const shortUrl = match[0];
+    const tiktokUrl = match[0];
     await sendMessage(chatId, token, "processing...");
-
-    // توسيع الرابط القصير أولاً
-    const tiktokUrl = await expandUrl(shortUrl);
-    console.log("Expanded URL:", tiktokUrl);
-
     let data = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       data = await fetchVideoData(tiktokUrl);
@@ -79,31 +61,21 @@ async function handleMessage(message, env) {
 }
 
 async function fetchVideoData(url) {
-  const tikwmResult = await fetchFromTikwm(url);
-  if (tikwmResult) return tikwmResult;
-  const lovetikResult = await fetchFromLovetik(url);
-  if (lovetikResult) return lovetikResult;
-  return null;
-}
-
-async function fetchFromTikwm(url) {
   const apis = [
     "https://api.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
     "https://www.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
   ];
   for (const api of apis) {
     try {
-      const res = await fetch(api, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-      });
+      const res = await fetch(api, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } });
       if (!res.ok) continue;
       const json = await res.json();
       if (json.code !== 0 || !json.data) continue;
       const d = json.data;
       const images = Array.isArray(d.images) && d.images.length > 0 ? d.images : [];
       const urls = [];
-      if (d.hdplay) urls.push(d.hdplay);
       if (d.play) urls.push(d.play);
+      if (d.hdplay) urls.push(d.hdplay);
       if (d.wmplay) urls.push(d.wmplay);
       if (urls.length === 0 && images.length === 0) continue;
       return {
@@ -115,43 +87,9 @@ async function fetchFromTikwm(url) {
         height: d.height || 0,
         duration: d.duration || 0,
       };
-    } catch (e) { console.error("tikwm failed:", e.message); }
+    } catch (e) { console.error("API failed:", e.message); }
   }
   return null;
-}
-
-async function fetchFromLovetik(url) {
-  try {
-    const res = await fetch("https://lovetik.com/api/ajax/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://lovetik.com/",
-      },
-      body: "query=" + encodeURIComponent(url),
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (!json.links || json.links.length === 0) return null;
-    const urls = [];
-    for (const link of json.links) {
-      if (link.a && link.a.includes("mp4")) urls.push(link.a);
-    }
-    if (urls.length === 0) return null;
-    return {
-      urls: urls,
-      images: [],
-      music: null,
-      musicTitle: "TikTok Audio",
-      width: 0,
-      height: 0,
-      duration: 0,
-    };
-  } catch (e) {
-    console.error("lovetik failed:", e.message);
-    return null;
-  }
 }
 
 async function sendVideoWithFallback(chatId, token, data) {
