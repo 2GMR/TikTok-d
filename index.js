@@ -52,7 +52,9 @@ async function handleMessage(message, env) {
         const mins = Math.floor(data.duration / 60);
         return await sendMessage(chatId, token, "sorry, video is too long (" + mins + " min). Max 4 minutes.");
       }
-      return await sendVideoWithFallback(chatId, token, data);
+      await sendVideoWithFallback(chatId, token, data);
+      if (data.music) { await sendAudio(chatId, token, data.music, data.musicTitle); }
+      return;
     }
     return await sendMessage(chatId, token, "no content found.");
   }
