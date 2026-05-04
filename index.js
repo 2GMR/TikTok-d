@@ -1,4 +1,5 @@
-const BOT_TOKEN = “8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w”;
+const BOT_TOKEN = "8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w";
+
 const ADMIN_ID = “6042456311”;
 
 export default {
