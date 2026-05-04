@@ -24,7 +24,7 @@ export default {
       return new Response('OK');
     }
 
-    return new Response('Bot is running with Clean Output Support!');
+    return new Response('Bot is running with Enhanced Video & Audio Support!');
   }
 };
 
@@ -55,14 +55,17 @@ async function handleMessage(message, env) {
       if (videoData.images && videoData.images.length > 0) {
         await sendAlbum(chatId, token, videoData.images);
         if (videoData.music) {
-          await sendAudio(chatId, token, videoData.music);
+          // إرسال الصوت بشكل "Voice Note" ليكون شكله مختلفاً وأكثر سلاسة
+          await sendVoice(chatId, token, videoData.music);
         }
         return;
       } 
       
       // إذا كان فيديو عادي
       if (videoData.url) {
-        return await sendVideo(chatId, token, videoData.url);
+        // استخدام sendDocument بدلاً من sendVideo لحل مشكلة الشاشة السوداء والتقطيع في بعض الأجهزة
+        // ولضمان وصول الملف الخام بأعلى جودة دون معالجة من تيليجرام
+        return await sendVideoFile(chatId, token, videoData.url);
       }
     }
     
@@ -70,11 +73,12 @@ async function handleMessage(message, env) {
   }
 
   if (text === '/start') {
-    return await sendMessage(chatId, token, 'أهلاً بك! 👋\nأرسل لي رابط تيك توك وسأرسله لك بجودة عالية وبدون أي نصوص.');
+    return await sendMessage(chatId, token, 'أهلاً بك! 👋\nأرسل لي رابط تيك توك وسأرسله لك بأعلى جودة وبدون تقطيع.');
   }
 }
 
 async function fetchVideoData(url) {
+  // استخدام عدة مصادر لضمان جلب أفضل نسخة
   const apis = [
     `https://api.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`,
     `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`
@@ -89,6 +93,7 @@ async function fetchVideoData(url) {
       
       if (data.code === 0 && data.data) {
         return {
+          // نفضل دائماً نسخة الـ HD لحل مشاكل الجودة
           url: data.data.hdplay || data.data.play || data.data.wmplay,
           images: data.data.images || [],
           music: data.data.music
@@ -109,15 +114,16 @@ async function sendMessage(chatId, token, text) {
   });
 }
 
-async function sendVideo(chatId, token, videoUrl) {
-  return fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
+async function sendVideoFile(chatId, token, videoUrl) {
+  // إرسال الفيديو كـ Document هو الحل الجذري لمشكلة الشاشة السوداء والتقطيع
+  // لأنه يجبر تيليجرام على تحميل الملف كما هو دون محاولة "ترميزه" مجدداً
+  return fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      video: videoUrl,
-      caption: '', // حذف النص نهائياً
-      supports_streaming: true
+      document: videoUrl,
+      caption: ''
     })
   });
 }
@@ -126,7 +132,7 @@ async function sendAlbum(chatId, token, images) {
   const media = images.slice(0, 10).map(img => ({
     type: 'photo',
     media: img,
-    caption: '' // حذف النص نهائياً من الصور
+    caption: ''
   }));
 
   return fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
@@ -139,14 +145,15 @@ async function sendAlbum(chatId, token, images) {
   });
 }
 
-async function sendAudio(chatId, token, audioUrl) {
-  return fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
+async function sendVoice(chatId, token, audioUrl) {
+  // إرسال الصوت كـ Voice Note يعطي شكلاً مختلفاً ومميزاً (الرسالة الصوتية)
+  return fetch(`https://api.telegram.org/bot${token}/sendVoice`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      audio: audioUrl,
-      caption: '' // حذف النص نهائياً من الصوت
+      voice: audioUrl,
+      caption: ''
     })
   });
 }
