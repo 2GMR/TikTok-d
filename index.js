@@ -35,7 +35,12 @@ async function handleMessage(message, env) {
   if (match) {
     const tiktokUrl = match[0];
     await sendMessage(chatId, token, "processing...");
-    const data = await fetchVideoData(tiktokUrl);
+    let data = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      data = await fetchVideoData(tiktokUrl);
+      if (data) break;
+      await new Promise(function(r) { setTimeout(r, 1500); });
+    }
     if (!data) { return await sendMessage(chatId, token, "failed to extract link."); }
     if (data.images && data.images.length > 0) {
       await sendAlbum(chatId, token, data.images);
