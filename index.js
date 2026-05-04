@@ -61,46 +61,21 @@ async function handleMessage(message, env) {
 }
 
 async function fetchVideoData(url) {
-  const result = await fetchFromTikwm(url);
-  if (result) return result;
-  return null;
-}
-
-async function fetchFromTikwm(url) {
-  const endpoints = [
-    {
-      url: "https://api.tikwm.com/api/",
-      method: "POST",
-      body: "url=" + encodeURIComponent(url) + "&hd=1",
-    },
-    {
-      url: "https://api.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
-      method: "GET",
-      body: null,
-    },
-    {
-      url: "https://www.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
-      method: "GET",
-      body: null,
-    },
+  const apis = [
+    "https://api.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
+    "https://www.tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
+    "https://tikwm.com/api/?url=" + encodeURIComponent(url) + "&hd=1",
   ];
-
-  for (const ep of endpoints) {
+  for (const api of apis) {
     try {
-      const options = {
-        method: ep.method,
+      const res = await fetch(api, {
+        method: "GET",
         headers: {
           "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-          "Accept": "application/json, text/plain, */*",
+          "Accept": "application/json",
           "Referer": "https://www.tiktok.com/",
-          "Origin": "https://www.tiktok.com",
         },
-      };
-      if (ep.body) {
-        options.headers["Content-Type"] = "application/x-www-form-urlencoded";
-        options.body = ep.body;
-      }
-      const res = await fetch(ep.url, options);
+      });
       if (!res.ok) continue;
       const json = await res.json();
       if (json.code !== 0 || !json.data) continue;
@@ -120,7 +95,7 @@ async function fetchFromTikwm(url) {
         height: d.height || 0,
         duration: d.duration || 0,
       };
-    } catch (e) { console.error("tikwm endpoint failed:", e.message); }
+    } catch (e) { console.error("API failed:", e.message); }
   }
   return null;
 }
@@ -138,7 +113,6 @@ async function sendVideoWithFallback(chatId, token, data) {
       if (result.description && result.description.includes("too large")) {
         return await sendMessage(chatId, token, "sorry, video is too large (max 50MB).");
       }
-      console.error("sendDocument failed:", result.description);
     } catch (e) { console.error("sendDocument exception:", e.message); }
   }
   return await sendMessage(chatId, token, "failed to send video.");
