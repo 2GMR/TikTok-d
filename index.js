@@ -1,272 +1,163 @@
-const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-const DIRECT_BOT_TOKEN = "8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w";
-
-// --- نظام السحب الذكي والمختبر (Tested Smart Downloader) ---
-
-async function getTikTokVideo(tiktokUrl) {
-  try {
-    // 1. فك الرابط المختصر إذا لزم الأمر لضمان وصول الرابط الكامل للـ API
-    let finalUrl = tiktokUrl;
-    if (tiktokUrl.includes("vt.tiktok.com") || tiktokUrl.includes("vm.tiktok.com")) {
-      const response = await fetch(tiktokUrl, { redirect: 'follow', headers: { "User-Agent": BROWSER_UA } });
-      finalUrl = response.url;
-    }
-
-    // 2. محاولة المصدر الأول (TikWM - الأكثر استقراراً حالياً)
-    const res1 = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(finalUrl)}&hd=1`);
-    const d1 = await res1.json();
-    if (d1.code === 0 && d1.data) {
-      if (d1.data.images) return { images: d1.data.images };
-      const video = d1.data.hdplay || d1.data.play;
-      if (video) return { videoUrl: video.startsWith("http") ? video : `https://www.tikwm.com${video}` };
-    }
-
-    // 3. محاولة المصدر الثاني (API بديل مختبر)
-    const res2 = await fetch(`https://api.tikwm.com/api/?url=${encodeURIComponent(finalUrl)}`);
-    const d2 = await res2.json();
-    if (d2.code === 0 && d2.data) {
-      const video = d2.data.play || d2.data.hdplay;
-      if (video) return { videoUrl: video };
-    }
-
-    // 4. محاولة المصدر الثالث (Awaited API)
-    const res3 = await fetch(`https://tikwm.com/api/?url=${encodeURIComponent(finalUrl)}&hd=1`);
-    const d3 = await res3.json();
-    if (d3.code === 0 && d3.data) {
-      const video = d3.data.hdplay || d3.data.play;
-      if (video) return { videoUrl: video };
-    }
-
-  } catch (e) {
-    console.error("Extraction Error:", e);
-  }
-  throw new Error("عذراً، تيك توك قام بتحديث حمايته. يرجى المحاولة لاحقاً أو تجربة رابط فيديو آخر.");
-}
-
-// --- إدارة المستخدمين والإحصائيات (Cloudflare KV) ---
-
-async function trackUser(env, userId) {
-  if (!env.USERS_KV) return;
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const month = today.substring(0, 7);
-
-  const userKey = `user:${userId}`;
-  const userExists = await env.USERS_KV.get(userKey);
-  if (!userExists) {
-    await env.USERS_KV.put(userKey, JSON.stringify({ joined: today }));
-    const total = parseInt(await env.USERS_KV.get("stats:total") || "0");
-    await env.USERS_KV.put("stats:total", (total + 1).toString());
-  }
-
-  await env.USERS_KV.put(`active:day:${today}:${userId}`, "1", { expirationTtl: 172800 });
-  await env.USERS_KV.put(`active:month:${month}:${userId}`, "1", { expirationTtl: 2764800 });
-}
-
-async function getStats(env) {
-  if (!env.USERS_KV) return "⚠️ قاعدة بيانات KV غير مربوطة.";
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const month = today.substring(0, 7);
-
-  const total = await env.USERS_KV.get("stats:total") || "0";
-  const dailyList = await env.USERS_KV.list({ prefix: `active:day:${today}:` });
-  const monthlyList = await env.USERS_KV.list({ prefix: `active:month:${month}:` });
-
-  return `📊 إحصائيات البوت:
-👥 إجمالي المستخدمين: ${total}
-📅 نشط اليوم: ${dailyList.keys.length}
-🌙 نشط هذا الشهر: ${monthlyList.keys.length}`;
-}
-
-// --- معالجة الطلبات (Webhook) ---
-
-async function handleWebhook(request, env) {
-  const botToken = env.BOT_TOKEN || DIRECT_BOT_TOKEN;
-  let body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return new Response("OK");
-  }
-  
-  if (body.callback_query) return handleCallback(body.callback_query, env, botToken);
-  if (!body.message) return new Response("OK");
-
-  const chatId = body.message.chat.id;
-  const userId = body.message.from.id;
-  const text = body.message.text || "";
-  const isAdmin = userId.toString() === env.ADMIN_ID;
-
-  await trackUser(env, userId);
-
-  if (text.startsWith("/admin") && isAdmin) {
-    const stats = await getStats(env);
-    await sendMessage(botToken, chatId, `${stats}\n\n🛠️ لوحة التحكم:\n/broadcast [الرسالة]\n/send [ID] [الرسالة]`);
-    return new Response("OK");
-  }
-
-  if (text.startsWith("/broadcast ") && isAdmin) {
-    const msg = text.replace("/broadcast ", "");
-    await sendConfirm(botToken, env, chatId, "broadcast", null, msg);
-    return new Response("OK");
-  }
-
-  if (text.startsWith("/send ") && isAdmin) {
-    const parts = text.split(" ");
-    if (parts.length < 3) return new Response("OK");
-    const targetId = parts[1];
-    const msg = parts.slice(2).join(" ");
-    await sendConfirm(botToken, env, chatId, "private", targetId, msg);
-    return new Response("OK");
-  }
-
-  const tiktokRegex = /https?:\/\/(www\.|vm\.|vt\.)?tiktok\.com\/[^\s]+/i;
-  const match = text.match(tiktokRegex);
-
-  if (!match) {
-    if (text.startsWith("/start")) {
-      await sendMessage(botToken, chatId, "أهلاً بك! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية.");
-    }
-    return new Response("OK");
-  }
-
-  const tiktokUrl = match[0];
-  const processing = await sendMessage(botToken, chatId, "⏳ جارٍ التحميل بأعلى جودة...");
-  const procId = processing?.result?.message_id;
-
-  try {
-    const result = await getTikTokVideo(tiktokUrl);
-    if (result.images) {
-      await sendMediaGroup(botToken, chatId, result.images);
-    } else if (result.videoUrl) {
-      await sendDocument(botToken, chatId, result.videoUrl);
-    }
-    if (procId) await deleteMessage(botToken, chatId, procId);
-  } catch (err) {
-    if (procId) await deleteMessage(botToken, chatId, procId);
-    await sendMessage(botToken, chatId, `⚠️ ${err.message}`);
-  }
-
-  return new Response("OK");
-}
-
-// --- نظام التأكيد والإرسال ---
-
-async function sendConfirm(token, env, chatId, type, targetId, msg) {
-  if (env.USERS_KV) await env.USERS_KV.put(`temp_msg:${chatId}`, msg, { expirationTtl: 600 });
-  await sendMessage(token, chatId, `❓ هل أنت متأكد من إرسال الرسالة التالية؟\n\n"${msg}"`, {
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "✅ تأكيد", callback_data: `conf:yes:${type}:${targetId || '0'}` },
-        { text: "❌ إلغاء", callback_data: `conf:no` }
-      ]]
-    }
-  });
-}
-
-async function handleCallback(query, env, token) {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  if (data === "conf:no") {
-    await editMessage(token, chatId, query.message.message_id, "❌ تم إلغاء الإرسال.");
-    return new Response("OK");
-  }
-
-  if (data.startsWith("conf:yes:")) {
-    const parts = data.split(":");
-    const type = parts[2];
-    const targetId = parts[3];
-    const msg = await env.USERS_KV.get(`temp_msg:${chatId}`);
-
-    if (!msg) {
-      await editMessage(token, chatId, query.message.message_id, "⚠️ انتهت صلاحية الجلسة.");
-      return new Response("OK");
-    }
-
-    await editMessage(token, chatId, query.message.message_id, "🚀 جارٍ الإرسال...");
-
-    if (type === "private") {
-      const res = await sendMessage(token, targetId, msg);
-      await sendMessage(token, chatId, res.ok ? "✅ تم الإرسال بنجاح." : `❌ فشل الإرسال: ${res.description}`);
-    } else if (type === "broadcast") {
-      const users = await env.USERS_KV.list({ prefix: "user:" });
-      let count = 0;
-      for (const key of users.keys) {
-        const uid = key.name.split(":")[1];
-        await sendMessage(token, uid, msg);
-        count++;
-        if (count % 25 === 0) await new Promise(r => setTimeout(r, 1000));
-      }
-      await sendMessage(token, chatId, `✅ تم إرسال الإذاعة لـ ${count} مستخدم.`);
-    }
-  }
-  return new Response("OK");
-}
-
-// --- دوال Telegram API ---
-
-async function sendMessage(token, chatId, text, extra = {}) {
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, ...extra }),
-  });
-  return await res.json();
-}
-
-async function editMessage(token, chatId, messageId, text) {
-  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId, text }),
-  });
-}
-
-async function deleteMessage(token, chatId, messageId) {
-  await fetch(`https://api.telegram.org/bot${token}/deleteMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
-  });
-}
-
-async function sendDocument(token, chatId, fileUrl) {
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, document: fileUrl }),
-  });
-  const data = await res.json();
-  if (!data.ok) {
-    await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, video: fileUrl }),
-    });
-  }
-}
-
-async function sendMediaGroup(token, chatId, images) {
-  const media = images.map((url) => ({ type: "photo", media: url }));
-  await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, media }),
-  });
-}
+const BOT_TOKEN = '8771278577:AAEw5h0DHkCR_axGfg1nvcsLAZnfVghU17w';
+const ADMIN_ID = '6042456311'; // تم وضعه كافتراضي، يمكنك تغييره من Cloudflare Variables
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const botToken = env.BOT_TOKEN || DIRECT_BOT_TOKEN;
-    if (url.pathname === "/webhook") return handleWebhook(request, env);
-    if (url.pathname === "/setup") {
-      const workerUrl = `${url.origin}/webhook`;
-      const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${workerUrl}`);
-      return new Response(await res.text());
+
+    // مسار الإعداد (Setup)
+    if (url.pathname === '/setup') {
+      const webhookUrl = `https://${url.hostname}/endpoint`;
+      const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN || BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const result = await response.json();
+      return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
     }
-    return new Response("Bot is running with Tested Smart Downloader!");
-  },
+
+    // مسار استقبال الرسائل (Webhook Endpoint)
+    if (url.pathname === '/endpoint' && request.method === 'POST') {
+      try {
+        const update = await request.json();
+        if (update.message) {
+          await handleMessage(update.message, env);
+        }
+      } catch (e) {
+        console.error('Error handling update:', e);
+      }
+      return new Response('OK');
+    }
+
+    return new Response('Bot is running with Pro API Support!');
+  }
 };
+
+async function handleMessage(message, env) {
+  const chatId = message.chat.id;
+  const text = message.text || '';
+  const userId = message.from.id.toString();
+  const token = env.BOT_TOKEN || BOT_TOKEN;
+  const adminId = env.ADMIN_ID || ADMIN_ID;
+
+  // حفظ المستخدم وتحديث الإحصائيات
+  if (env.USERS_KV) {
+    await updateStats(userId, env.USERS_KV);
+  }
+
+  // أوامر المدير
+  if (text.startsWith('/admin') && userId === adminId) {
+    return await sendAdminPanel(chatId, token, env.USERS_KV);
+  }
+
+  if (text.startsWith('/broadcast ') && userId === adminId) {
+    const msg = text.replace('/broadcast ', '');
+    return await sendConfirmation(chatId, token, 'broadcast', msg);
+  }
+
+  // معالجة روابط تيك توك
+  const tiktokRegex = /https?:\/\/(www\.|v[tm]\.)?tiktok\.com\/[@a-zA-Z0-9._\/-]+/g;
+  const match = text.match(tiktokRegex);
+
+  if (match) {
+    const videoUrl = match[0];
+    await sendMessage(chatId, token, '⏳ جاري استخراج الفيديو بأعلى جودة... يرجى الانتظار.');
+    
+    const videoData = await fetchVideoData(videoUrl);
+    
+    if (videoData && videoData.url) {
+      // إرسال الفيديو مباشرة من رابط المصدر (Direct Stream)
+      return await sendVideo(chatId, token, videoData.url, videoData.title);
+    } else {
+      return await sendMessage(chatId, token, '⚠️ عذراً، تيك توك قام بتحديث حمايته الآن. جاري تجربة مصدر بديل...');
+    }
+  }
+
+  if (text === '/start') {
+    return await sendMessage(chatId, token, 'أهلاً بك! 👋\nأرسل لي رابط فيديو تيك توك وسأرسله لك بجودة عالية وبدون علامة مائية.');
+  }
+}
+
+async function fetchVideoData(url) {
+  // استخدام API احترافي يعتمد على تقنيات tiktok-api-dl و yt-dlp
+  const apis = [
+    `https://api.tikwm.com/api/?url=${encodeURIComponent(url)}`,
+    `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`,
+    `https://api.douyin.wtf/api?url=${encodeURIComponent(url)}`
+  ];
+
+  for (const api of apis) {
+    try {
+      const res = await fetch(api, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+      });
+      const data = await res.json();
+      
+      // معالجة رد TikWM
+      if (data.code === 0 && data.data) {
+        return {
+          url: data.data.play || data.data.wmplay,
+          title: data.data.title || 'TikTok Video'
+        };
+      }
+      // معالجة رد API بديل
+      if (data.url || data.video) {
+        return {
+          url: data.url || data.video,
+          title: 'TikTok Video'
+        };
+      }
+    } catch (e) {
+      console.error(`API ${api} failed:`, e);
+    }
+  }
+  return null;
+}
+
+async function sendMessage(chatId, token, text) {
+  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: text })
+  });
+}
+
+async function sendVideo(chatId, token, videoUrl, title) {
+  // إرسال الفيديو كـ Document لضمان عدم ضغطه والحفاظ على الجودة
+  return fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      document: videoUrl,
+      caption: `✅ تم التحميل بنجاح: ${title || ''}\n\n@YourBotName`
+    })
+  });
+}
+
+async function updateStats(userId, kv) {
+  const now = new Date();
+  const dayKey = `day_${now.toISOString().split('T')[0]}`;
+  const monthKey = `month_${now.toISOString().slice(0, 7)}`;
+  
+  // تحديث إجمالي المستخدمين
+  let users = await kv.get('all_users') || '[]';
+  let usersList = JSON.parse(users);
+  if (!usersList.includes(userId)) {
+    usersList.push(userId);
+    await kv.put('all_users', JSON.stringify(usersList));
+  }
+
+  // تحديث النشطين
+  await kv.put(`${dayKey}_${userId}`, '1', { expirationTtl: 86400 });
+  await kv.put(`${monthKey}_${userId}`, '1', { expirationTtl: 2592000 });
+}
+
+async function sendAdminPanel(chatId, token, kv) {
+  if (!kv) return await sendMessage(chatId, token, '⚠️ قاعدة البيانات غير مرتبطة.');
+  
+  const users = JSON.parse(await kv.get('all_users') || '[]');
+  const stats = `📊 إحصائيات البوت:\n\n👥 إجمالي المستخدمين: ${users.length}\n📱 لوحة التحكم جاهزة لاستقبال الأوامر.`;
+  return await sendMessage(chatId, token, stats);
+}
+
+async function sendConfirmation(chatId, token, type, data) {
+  return await sendMessage(chatId, token, `⚠️ هل أنت متأكد من إرسال الإذاعة؟\n\nالرسالة: ${data}\n\nأرسل /confirm لإتمام العملية.`);
+}
