@@ -24,7 +24,7 @@ export default {
       return new Response('OK');
     }
 
-    return new Response('Bot is running with Image & Audio Support!');
+    return new Response('Bot is running with Clean Output Support!');
   }
 };
 
@@ -53,26 +53,24 @@ async function handleMessage(message, env) {
     if (videoData) {
       // إذا كان المنشور عبارة عن صور (Slideshow)
       if (videoData.images && videoData.images.length > 0) {
-        // إرسال الصور كمجموعة (Album)
         await sendAlbum(chatId, token, videoData.images);
-        // إرسال الصوت بشكل منفصل
         if (videoData.music) {
-          await sendAudio(chatId, token, videoData.music, videoData.title);
+          await sendAudio(chatId, token, videoData.music);
         }
         return;
       } 
       
       // إذا كان فيديو عادي
       if (videoData.url) {
-        return await sendVideo(chatId, token, videoData.url, videoData.title);
+        return await sendVideo(chatId, token, videoData.url);
       }
     }
     
-    return await sendMessage(chatId, token, '⚠️ عذراً، فشل استخراج المحتوى. تأكد من أن الرابط عام وليس خاصاً.');
+    return await sendMessage(chatId, token, '⚠️ عذراً، فشل استخراج المحتوى.');
   }
 
   if (text === '/start') {
-    return await sendMessage(chatId, token, 'أهلاً بك! 👋\nأرسل لي رابط تيك توك (فيديو أو صور) وسأرسله لك بجودة عالية وبدون علامة مائية.');
+    return await sendMessage(chatId, token, 'أهلاً بك! 👋\nأرسل لي رابط تيك توك وسأرسله لك بجودة عالية وبدون أي نصوص.');
   }
 }
 
@@ -92,9 +90,8 @@ async function fetchVideoData(url) {
       if (data.code === 0 && data.data) {
         return {
           url: data.data.hdplay || data.data.play || data.data.wmplay,
-          title: data.data.title,
-          images: data.data.images || [], // دعم الصور
-          music: data.data.music // رابط الصوت
+          images: data.data.images || [],
+          music: data.data.music
         };
       }
     } catch (e) {
@@ -112,14 +109,14 @@ async function sendMessage(chatId, token, text) {
   });
 }
 
-async function sendVideo(chatId, token, videoUrl, title) {
+async function sendVideo(chatId, token, videoUrl) {
   return fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       video: videoUrl,
-      caption: title || '', // إرسال العنوان الأصلي فقط بدون إضافات
+      caption: '', // حذف النص نهائياً
       supports_streaming: true
     })
   });
@@ -128,7 +125,8 @@ async function sendVideo(chatId, token, videoUrl, title) {
 async function sendAlbum(chatId, token, images) {
   const media = images.slice(0, 10).map(img => ({
     type: 'photo',
-    media: img
+    media: img,
+    caption: '' // حذف النص نهائياً من الصور
   }));
 
   return fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
@@ -141,14 +139,14 @@ async function sendAlbum(chatId, token, images) {
   });
 }
 
-async function sendAudio(chatId, token, audioUrl, title) {
+async function sendAudio(chatId, token, audioUrl) {
   return fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       audio: audioUrl,
-      title: title || 'TikTok Audio'
+      caption: '' // حذف النص نهائياً من الصوت
     })
   });
 }
