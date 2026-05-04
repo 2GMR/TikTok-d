@@ -86,11 +86,10 @@
 }
 }
 
-// نجلب عدة روابط بدائل لنفس الفيديو
 ‏async function fetchVideoData(url) {
 ‏const apis = [
-‏`https://api.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`,
-‏`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`,
+‏“https://api.tikwm.com/api/?url=” + encodeURIComponent(url) + “&hd=1”,
+‏“https://www.tikwm.com/api/?url=” + encodeURIComponent(url) + “&hd=1”,
 ];
 
 ‏for (const api of apis) {
@@ -108,22 +107,20 @@
 ‏  if (json.code !== 0 || !json.data) continue;
 
 ‏  const d = json.data;
-
 ‏  const images = Array.isArray(d.images) && d.images.length > 0 ? d.images : [];
 
-  // نجمع كل الروابط المتاحة بالترتيب — play اولاً لانه الاكثر استقراراً
 ‏  const urls = [];
-‏  if (d.play)   urls.push(d.play);
+‏  if (d.play) urls.push(d.play);
 ‏  if (d.hdplay) urls.push(d.hdplay);
 ‏  if (d.wmplay) urls.push(d.wmplay);
 
 ‏  if (urls.length === 0 && images.length === 0) continue;
 
 ‏  return {
-‏    urls,
-‏    images,
+‏    urls: urls,
+‏    images: images,
 ‏    music: d.music || null,
-‏    musicTitle: (d.music_info && d.music_info.title) ? d.music_info.title : "TikTok Audio",
+‏    musicTitle: d.music_info && d.music_info.title ? d.music_info.title : "TikTok Audio",
 ‏    width: d.width || 0,
 ‏    height: d.height || 0,
 ‏    duration: d.duration || 0,
@@ -138,7 +135,6 @@
 ‏return null;
 }
 
-// نجرب كل رابط بالترتيب حتى ينجح واحد
 ‏async function sendVideoWithFallback(chatId, token, data) {
 ‏for (const videoUrl of data.urls) {
 ‏const body = {
@@ -149,12 +145,12 @@
 };
 
 ```
-‏if (data.width)    body.width    = data.width;
-‏if (data.height)   body.height   = data.height;
+‏if (data.width) body.width = data.width;
+‏if (data.height) body.height = data.height;
 ‏if (data.duration) body.duration = data.duration;
 
 ‏try {
-‏  const res = await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
+‏  const res = await fetch("https://api.telegram.org/bot" + token + "/sendVideo", {
 ‏    method: "POST",
 ‏    headers: { "Content-Type": "application/json" },
 ‏    body: JSON.stringify(body),
@@ -163,10 +159,10 @@
 ‏  const result = await res.json();
 
 ‏  if (result.ok) {
-‏    return result; // نجح الإرسال
+‏    return result;
   }
 
-‏  console.error("sendVideo failed for url:", videoUrl, result.description);
+‏  console.error("sendVideo failed:", result.description);
 ‏} catch (e) {
 ‏  console.error("sendVideo exception:", e.message);
 }
@@ -174,7 +170,6 @@
 
 }
 
-// كل الروابط فشلت
 ‏return await sendMessage(chatId, token, “failed to send video.”);
 }
 
@@ -185,7 +180,7 @@
 ‏return item;
 });
 
-‏return fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
+‏return fetch(“https://api.telegram.org/bot” + token + “/sendMediaGroup”, {
 ‏method: “POST”,
 ‏headers: { “Content-Type”: “application/json” },
 ‏body: JSON.stringify({ chat_id: chatId, media: media }),
@@ -193,7 +188,7 @@
 }
 
 ‏async function sendAudio(chatId, token, audioUrl, title) {
-‏const res = await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
+‏const res = await fetch(“https://api.telegram.org/bot” + token + “/sendAudio”, {
 ‏method: “POST”,
 ‏headers: { “Content-Type”: “application/json” },
 ‏body: JSON.stringify({
@@ -207,7 +202,7 @@
 ‏const result = await res.json();
 
 ‏if (!result.ok) {
-‏return fetch(`https://api.telegram.org/bot${token}/sendVoice`, {
+‏return fetch(“https://api.telegram.org/bot” + token + “/sendVoice”, {
 ‏method: “POST”,
 ‏headers: { “Content-Type”: “application/json” },
 ‏body: JSON.stringify({ chat_id: chatId, voice: audioUrl }),
@@ -216,7 +211,7 @@
 }
 
 ‏async function sendMessage(chatId, token, text) {
-‏return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+‏return fetch(“https://api.telegram.org/bot” + token + “/sendMessage”, {
 ‏method: “POST”,
 ‏headers: { “Content-Type”: “application/json” },
 ‏body: JSON.stringify({ chat_id: chatId, text: text }),
